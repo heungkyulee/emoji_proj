@@ -33,17 +33,60 @@ export default function Registration() {
 
   return (
     <>
-      <div>이름 등록하기</div>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="이름을 입력하세요"
-          required
-        />
-        <button type="submit">등록</button>
-      </form>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+          background: "#f0f2f5",
+        }}
+      >
+        <div
+          style={{
+            width: "400px",
+            background: "white",
+            padding: "20px",
+            borderRadius: "8px",
+            boxShadow: "0 4px 8px rgba(0, 0, 0, 0.1)",
+          }}
+        >
+          <h1 style={{ textAlign: "center", marginBottom: "20px" }}>
+            Eterners
+          </h1>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: "20px" }}>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="이름을 입력하세요"
+                required
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  borderRadius: "5px",
+                  border: "1px solid #ccc",
+                }}
+              />
+            </div>
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                padding: "10px",
+                borderRadius: "5px",
+                border: "none",
+                color: "white",
+                backgroundColor: "#007bff",
+                cursor: "pointer",
+              }}
+            >
+              등록
+            </button>
+          </form>
+        </div>
+      </div>
     </>
   );
 }
