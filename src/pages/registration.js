@@ -51,7 +51,15 @@ export default function Registration() {
             boxShadow: "0 4px 8px rgba(0, 0, 0, 0.1)",
           }}
         >
-          <h1 style={{ textAlign: "center", marginBottom: "20px" }}>
+          <h1
+            style={{
+              textAlign: "center",
+              marginBottom: "20px",
+              color: "black",
+              fontWeight: 800,
+              fontSize: "24px",
+            }}
+          >
             Eterners
           </h1>
           <form onSubmit={handleSubmit}>

@@ -1,23 +1,83 @@
-"use client";
-
+import React, { useEffect, useState } from "react";
+import { useRouter } from "next/router";
 import ChatComponent from "@/app/components/room/ChatComponent";
 import EmoticonPicker from "@/app/components/room/EmoticonPicker";
 import { Header } from "@/app/components/room/Header";
-import { useRouter } from "next/router";
-import React, { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "react-query";
+
+const fetchEmoticons = async (roomId) => {
+  const response = await fetch(`/api/get-messages?roomId=${roomId}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error("Network response was not ok");
+  }
+  const result = await response.json();
+  return result.results;
+};
+
+const sendMessage = async ({ roomId, senderID, messageContent }) => {
+  const response = await fetch("/api/send-message", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ChatRoomID: roomId,
+      SenderID: senderID,
+      MessageContent: messageContent,
+      Timestamp: new Date().toISOString(),
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Network response was not ok");
+  }
+
+  return response.json();
+};
 
 const RoomDetailScreen = () => {
-  const [emoticons, setEmoticons] = useState([]);
+  // const [emoticons, setEmoticons] = useState([]);
   const [messages, setMessages] = useState([]);
   const [roomInfo, setRoomInfo] = useState([]);
   const [roomName, setRoomName] = useState();
-  const router = useRouter();
-  const { roomId } = router.query; // URL에서 roomId 파라미터를 가져옴
-
   const [userId, setUserId] = useState();
 
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation(sendMessage, {
+    onSuccess: () => {
+      queryClient.invalidateQueries(["emoticons", roomId]);
+    },
+  });
+
+  const handleEmoticonSelect = (emoticon) => {
+    mutation.mutate({
+      roomId: roomId,
+      senderID: userId,
+      messageContent: JSON.stringify(emoticon.images),
+    });
+  };
+
+  const router = useRouter();
+  const { roomId } = router.query;
+
+  // 여기서 useQuery를 사용하여 emoticons 데이터를 관리
+  const {
+    data: emoticons,
+    isError,
+    error,
+    refetch,
+  } = useQuery(["emoticons", roomId], () => fetchEmoticons(roomId), {
+    enabled: !!roomId, // roomId가 있을 때만 쿼리를 실행
+    refetchInterval: 500,
+  });
+
   useEffect(() => {
-    // 컴포넌트가 마운트될 때 localStorage에서 userInfo를 가져오고 userId 상태를 설정합니다.
     const userInfo = localStorage.getItem("user");
     if (userInfo) {
       const parsedUserInfo = JSON.parse(userInfo);
@@ -27,27 +87,6 @@ const RoomDetailScreen = () => {
 
   useEffect(() => {
     if (roomId) {
-      const fetchEmoticons = async () => {
-        try {
-          const response = await fetch(`/api/get-messages?roomId=${roomId}`, {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          });
-
-          if (!response.ok) {
-            throw new Error("Network response was not ok");
-          }
-
-          const result = await response.json();
-          const _emoticons = result.results;
-          setEmoticons(_emoticons);
-        } catch (error) {
-          console.error("Error fetching messages:", error);
-        }
-      };
-
       const getRoomInfo = async () => {
         try {
           const response = await fetch(`/api/get-room-info?roomId=${roomId}`, {
@@ -63,13 +102,12 @@ const RoomDetailScreen = () => {
 
           const result = await response.json();
           setRoomInfo(result.results);
-          setRoomName(roomInfo != [] ? roomInfo[0].RoomName : "");
+          setRoomName(roomInfo.length !== 0 ? roomInfo[0].RoomName : "");
         } catch (error) {
           console.error("Error:", error);
         }
       };
 
-      fetchEmoticons();
       getRoomInfo();
     }
   }, [roomId]);
@@ -84,52 +122,51 @@ const RoomDetailScreen = () => {
     return () => window.removeEventListener("resize", setScreenSize);
   }, []);
 
-  // EmoticonPicker 컴포넌트 안에 있는 onEmoticonSelect 함수 예시
-  const handleEmoticonSelect = async (emoticon) => {
-    const senderID = userId; // 예시: 현재 사용자 ID
-    const messageContent = JSON.stringify(emoticon.images); // 이모티콘 이미지 URL 배열을 문자열로 변환
+  // const handleEmoticonSelect = async (emoticon) => {
+  //   const senderID = userId;
+  //   const messageContent = JSON.stringify(emoticon.images);
 
-    try {
-      const response = await fetch("/api/send-message", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ChatRoomID: roomId,
-          SenderID: senderID,
-          MessageContent: messageContent,
-          Timestamp: new Date().toISOString(), // 현재 시각
-        }),
-      });
+  //   try {
+  //     const response = await fetch("/api/send-message", {
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //       },
+  //       body: JSON.stringify({
+  //         ChatRoomID: roomId,
+  //         SenderID: senderID,
+  //         MessageContent: messageContent,
+  //         Timestamp: new Date().toISOString(),
+  //       }),
+  //     });
 
-      if (!response.ok) {
-        throw new Error("Network response was not ok");
-      }
+  //     if (!response.ok) {
+  //       throw new Error("Network response was not ok");
+  //     }
 
-      const result = await response.json();
-      console.log("Message sent successfully:", result);
-    } catch (error) {
-      console.error("Error sending message:", error);
-    }
-  };
+  //     const result = await response.json();
+  //     console.log("Message sent successfully:", result);
+  //   } catch (error) {
+  //     console.error("Error sending message:", error);
+  //   }
+  // };
 
-  const updateEmoticonFrame = (index, FrameChange) => {
-    setEmoticons((prevEmoticons) =>
-      prevEmoticons.map((item, i) => {
-        if (i === index) {
-          const newFrame = item.Frame + FrameChange;
-          const maxFrame = JSON.parse(item.MessageContent).length - 1;
-          return {
-            ...item,
-            Frame:
-              newFrame >= 0 && newFrame <= maxFrame ? newFrame : item.Frame,
-          };
-        }
-        return item;
-      })
-    );
-  };
+  // const updateEmoticonFrame = (index, FrameChange) => {
+  //   setEmoticons((prevEmoticons) =>
+  //     prevEmoticons.map((item, i) => {
+  //       if (i === index) {
+  //         const newFrame = item.Frame + FrameChange;
+  //         const maxFrame = JSON.parse(item.MessageContent).length - 1;
+  //         return {
+  //           ...item,
+  //           Frame:
+  //             newFrame >= 0 && newFrame <= maxFrame ? newFrame : item.Frame,
+  //         };
+  //       }
+  //       return item;
+  //     })
+  //   );
+  // };
 
   return (
     <div
@@ -149,7 +186,9 @@ const RoomDetailScreen = () => {
       <EmoticonPicker onEmoticonSelect={handleEmoticonSelect} />
       <ChatComponent
         emoticons={emoticons}
-        updateEmoticonFrame={updateEmoticonFrame}
+        // updateEmoticonFrame={updateEmoticonFrame}
+        roomId={roomId}
+        // setEmoticons={setEmoticons}
       />
     </div>
   );

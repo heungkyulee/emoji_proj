@@ -1,11 +1,29 @@
-"use client";
-
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import DefaultProfile from "../../assets/profile/defaultProfile.png";
 import Lottie from "react-lottie";
 import TouchAnimation from "../../assets/animation/touch/TouchAnimation.json";
 import SwipeLeftAnimation from "../../assets/animation/swipe_left/SwipeLeftAnimation.json";
 import Image from "next/image";
+import { useMutation, useQuery, useQueryClient } from "react-query";
+
+const updateEmoticonFrame = async (messageID, frameChange) => {
+  const response = await fetch(`/api/update-emoticon-frame`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messageID,
+      frameChange,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Network response was not ok");
+  }
+
+  return response.json();
+};
 
 function convertToKoreanTimeFormat(isoString) {
   const date = new Date(isoString);
@@ -21,21 +39,73 @@ function convertToKoreanTimeFormat(isoString) {
     .replace("PM", "오후");
 }
 
-const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
-  const endOfMessagesRef = useRef(null); // 메시지의 끝을 참조할 ref 생성
+const ChatComponent = ({ emoticons = [], roomId }) => {
+  const endOfMessagesRef = useRef(null);
+  const scrollContainerRef = useRef(null);
+  const queryClient = useQueryClient();
+  const mutation = useMutation(updateEmoticonFrame, {
+    onSuccess: () => {
+      queryClient.invalidateQueries(["emoticons", roomId]);
+    },
+    onError: (error) => {
+      console.error("An error occurred: ", error.message);
+    },
+  });
+
+  const handleUpdateFrame = useCallback(
+    (messageID, direction) => {
+      const emoticonIndex = emoticons.findIndex(
+        (e) => e.messageID === messageID
+      );
+      if (emoticonIndex === -1) return; // 해당 이모티콘을 찾지 못한 경우
+
+      const currentFrame = emoticons[emoticonIndex].frame;
+      let newFrame = currentFrame + direction;
+      newFrame = Math.max(0, Math.min(newFrame, 4)); // 프레임 범위 제한
+
+      if (newFrame !== currentFrame) {
+        // 프레임이 변경된 경우에만 업데이트
+        mutation.mutate({ messageID, frameChange: newFrame - currentFrame });
+      }
+    },
+    [mutation, emoticons]
+  );
+
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
-
   const [userId, setUserId] = useState(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  useEffect(() => {
-    // 컴포넌트가 마운트될 때 localStorage에서 userInfo를 가져오고 userId 상태를 설정합니다.
-    const userInfo = localStorage.getItem("user");
-    if (userInfo) {
-      const parsedUserInfo = JSON.parse(userInfo);
-      setUserId(parsedUserInfo.userId);
+  const fetchMoreMessages = useCallback(async () => {
+    const lastMessageId = emoticons[emoticons.length - 1]?.MessageID;
+    if (!lastMessageId) return;
+
+    try {
+      const response = await fetch(
+        `/api/get-messages?roomId=${roomId}&lastMessageId=${lastMessageId}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+
+      const result = await response.json();
+      const newEmoticons = result.results;
+
+      queryClient.setQueryData(["emoticons", roomId], (oldData) => [
+        ...oldData,
+        ...newEmoticons,
+      ]);
+    } catch (error) {
+      console.error("Error fetching more messages:", error);
     }
-  }, []);
+  }, [roomId, queryClient, emoticons]);
 
   const touchAnimationOptions = {
     loop: true,
@@ -56,31 +126,78 @@ const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
   };
 
   useEffect(() => {
-    // emoticons 배열이 변경될 때마다 스크롤을 메시지의 끝으로 이동
     endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [emoticons]);
+    setTimeout(() => {
+      setIsInitialLoad(false);
+    }, 1000);
+  }, [isInitialLoad]);
 
-  // 메시지 발송 시간 포맷팅 함수
-  const formatTime = (timestamp) => {
-    return new Date(timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
+  const handleTouchMove = useCallback(
+    (index, direction) => {
+      const messageID = emoticons[index].messageID;
+      handleUpdateFrame(messageID, direction); // direction 값을 그대로 전달
+    },
+    [handleUpdateFrame, emoticons]
+  );
+
+  useEffect(() => {
+    const handleTouchStart = (e) => {
+      setTouchStart(e.targetTouches[0].clientX);
+    };
+
+    const handleTouchEnd = (e, index) => {
+      setTouchEnd(e.changedTouches[0].clientX);
+      console.log(touchStart, touchEnd);
+      const direction =
+        touchStart - touchEnd > 50 ? -1 : touchStart - touchEnd < -50 ? 1 : 0;
+      if (direction !== 0) {
+        handleTouchMove(index, direction);
+      }
+    };
+
+    const emoticonElements = document.querySelectorAll(".emoticon-div");
+    emoticonElements.forEach((elem, index) => {
+      elem.addEventListener("touchstart", handleTouchStart);
+      elem.addEventListener("touchend", (e) => handleTouchEnd(e, index));
     });
-  };
 
-  // 스와이프 방향을 판단하고 프레임 업데이트
-  const handleTouchMove = (index) => {
-    if (touchStart - touchEnd > 50) {
-      // 오른쪽에서 왼쪽으로 충분히 스와이프
-      updateEmoticonFrame(index, -1);
-    } else if (touchStart - touchEnd < -50) {
-      // 왼쪽에서 오른쪽으로 충분히 스와이프
-      updateEmoticonFrame(index, 1);
+    return () => {
+      emoticonElements.forEach((elem) => {
+        elem.removeEventListener("touchstart", handleTouchStart);
+        elem.removeEventListener("touchend", handleTouchEnd);
+      });
+    };
+  }, [handleUpdateFrame, touchStart, touchEnd]);
+
+  useEffect(() => {
+    const userInfo = localStorage.getItem("user");
+    if (userInfo) {
+      const parsedUserInfo = JSON.parse(userInfo);
+      setUserId(parsedUserInfo.userId);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const loadMoreMessages = () => {
+      if (scrollContainer.scrollTop === 0) {
+        fetchMoreMessages();
+      }
+    };
+    const scrollContainer = scrollContainerRef.current;
+    if (scrollContainer) {
+      scrollContainer.addEventListener("scroll", loadMoreMessages);
+    }
+
+    return () => {
+      if (scrollContainer) {
+        scrollContainer.removeEventListener("scroll", loadMoreMessages);
+      }
+    };
+  }, [emoticons]);
 
   return (
     <div
+      ref={scrollContainerRef}
       style={{
         overflowY: "scroll",
         position: "relative",
@@ -103,7 +220,9 @@ const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
             setTouchEnd(e.changedTouches[0].clientX);
             handleTouchMove(index);
           }}
-          onClick={() => updateEmoticonFrame(index, 1)}
+          onClick={() => {
+            updateEmoticonFrame(index, 1);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             updateEmoticonFrame(index, -1);
@@ -125,7 +244,11 @@ const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
                 width={48}
                 height={48}
                 alt="Profile"
-                style={{ width: "48px", height: "48px", borderRadius: "50%" }}
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "50%",
+                }}
               />
               <div
                 style={{
@@ -163,14 +286,12 @@ const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
                         bottom: 0,
                       }}
                     >
-                      {
-                        // <Lottie
-                        //   options={swipeLeftAnimationOptions}
-                        //   height={"100%"}
-                        //   width={"100%"}
-                        // />
-                      }
                       {/* <Lottie
+                        options={swipeLeftAnimationOptions}
+                        height={"100%"}
+                        width={"100%"}
+                      />
+                      <Lottie
                         options={touchAnimationOptions}
                         height={"100%"}
                         width={"100%"}
@@ -185,8 +306,7 @@ const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
                     />
                   </div>
                 </div>
-                <div>{convertToKoreanTimeFormat(item.Timestamp)}</div>{" "}
-                {/* 메시지 발송 시간 표시 */}
+                <div>{convertToKoreanTimeFormat(item.Timestamp)}</div>
               </div>
             </>
           )}
@@ -201,7 +321,6 @@ const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
                 }}
               >
                 <div>{convertToKoreanTimeFormat(item.Timestamp)}</div>
-                {/* 메시지 발송 시간 표시 */}
                 <div
                   style={{
                     backgroundColor: "#F8E44B",
@@ -222,7 +341,7 @@ const ChatComponent = ({ emoticons, updateEmoticonFrame }) => {
           )}
         </div>
       ))}
-      <div ref={endOfMessagesRef} /> {/* 메시지의 끝을 나타내는 빈 div */}
+      <div ref={endOfMessagesRef} />
     </div>
   );
 };
